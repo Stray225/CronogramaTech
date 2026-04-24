@@ -156,6 +156,7 @@ function WeekBlock({ week, weekIndex, employees, month, onShiftChange, onGuardCh
                         key={dateStr}
                         date={dateStr}
                         employeeId={emp.id}
+                        empColorIdx={ei}
                         assignment={assignment}
                         isWeekend={date.getDay() === 0 || date.getDay() === 6}
                         dimmed={isOutside(date)}
