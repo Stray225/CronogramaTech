@@ -3,20 +3,27 @@
 import { memo } from "react";
 import { Employee, MonthSchedule, WeekSchedule } from "@/types/schedule";
 import { getDatesInWeek, formatDate, parseLocalDate } from "@/lib/dateUtils";
-import ShiftCell from "./ShiftCell";
+import ShiftCardCell from "./ShiftCardCell";
 import GuardWeekFooter from "./GuardWeekCell";
 
-const DAY_SHORT = ["Lun","Mar","Mié","Jue","Vie","Sáb","Dom"];
-
-/** High-contrast per-employee column color. */
-export const EMPLOYEE_COLORS = [
-  { bg: "bg-sky-100 dark:bg-sky-900/70",     text: "text-sky-950 dark:text-sky-50",     border: "border-sky-500 dark:border-sky-400",    dot: "bg-sky-500 dark:bg-sky-400",    cellBg: "bg-sky-50/60 dark:bg-sky-950/40"    },
-  { bg: "bg-teal-100 dark:bg-teal-900/70",   text: "text-teal-950 dark:text-teal-50",   border: "border-teal-500 dark:border-teal-400",  dot: "bg-teal-500 dark:bg-teal-400",  cellBg: "bg-teal-50/60 dark:bg-teal-950/40"  },
-  { bg: "bg-violet-100 dark:bg-violet-900/70",text:"text-violet-950 dark:text-violet-50",border:"border-violet-500 dark:border-violet-400",dot:"bg-violet-500 dark:bg-violet-400",cellBg:"bg-violet-50/60 dark:bg-violet-950/40"},
-  { bg: "bg-orange-100 dark:bg-orange-900/70",text:"text-orange-950 dark:text-orange-50",border:"border-orange-500 dark:border-orange-400",dot:"bg-orange-500 dark:bg-orange-400",cellBg:"bg-orange-50/60 dark:bg-orange-950/40"},
-  { bg: "bg-rose-100 dark:bg-rose-900/70",   text: "text-rose-950 dark:text-rose-50",   border: "border-rose-500 dark:border-rose-400",  dot: "bg-rose-500 dark:bg-rose-400",  cellBg: "bg-rose-50/60 dark:bg-rose-950/40"  },
+// ── Employee avatar styles (per position) ─────────────────────────────────────
+const EMP_AVATAR = [
+  { ring: "bg-sky-500",    text: "text-white" },
+  { ring: "bg-teal-500",   text: "text-white" },
+  { ring: "bg-violet-500", text: "text-white" },
+  { ring: "bg-orange-500", text: "text-white" },
+  { ring: "bg-rose-500",   text: "text-white" },
 ] as const;
 
+const DAY_SHORT  = ["Lun","Mar","Mié","Jue","Vie","Sáb","Dom"];
+
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/);
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+  return name.slice(0, 2).toUpperCase();
+}
+
+// ── ScheduleTable ─────────────────────────────────────────────────────────────
 interface ScheduleTableProps {
   schedule:      MonthSchedule;
   employees:     readonly Employee[];
@@ -26,13 +33,12 @@ interface ScheduleTableProps {
 
 function ScheduleTable({ schedule, employees, onShiftChange, onGuardChange }: ScheduleTableProps) {
   return (
-    /* 2 weeks per row on xl screens — halves vertical scroll */
-    <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-      {schedule.weeks.map((week, weekIndex) => (
-        <WeekCard
+    <div className="space-y-6">
+      {schedule.weeks.map((week, wi) => (
+        <WeekBlock
           key={week.startDate}
           week={week}
-          weekIndex={weekIndex}
+          weekIndex={wi}
           employees={employees}
           month={schedule.month}
           onShiftChange={onShiftChange}
@@ -45,9 +51,8 @@ function ScheduleTable({ schedule, employees, onShiftChange, onGuardChange }: Sc
 
 export default memo(ScheduleTable);
 
-// ── Week Card ─────────────────────────────────────────────────────────────────
-
-interface WeekCardProps {
+// ── WeekBlock ─────────────────────────────────────────────────────────────────
+interface WeekBlockProps {
   week:          WeekSchedule;
   weekIndex:     number;
   employees:     readonly Employee[];
@@ -56,102 +61,104 @@ interface WeekCardProps {
   onGuardChange: (wi: number, empId: string | null) => void;
 }
 
-function WeekCard({ week, weekIndex, employees, month, onShiftChange, onGuardChange }: WeekCardProps) {
+function WeekBlock({ week, weekIndex, employees, month, onShiftChange, onGuardChange }: WeekBlockProps) {
   const weekStart = parseLocalDate(week.startDate);
   const dates     = getDatesInWeek(weekStart);
-
   const isOutside = (d: Date) => d.getMonth() + 1 !== month;
 
-  // Compact date range from in-month days only
-  const inMonth     = dates.filter((d) => !isOutside(d));
-  const rangeFirst  = inMonth[0];
-  const rangeLast   = inMonth[inMonth.length - 1];
-  const rangeLabel  = rangeFirst && rangeLast
-    ? `${rangeFirst.getDate()}/${rangeFirst.getMonth()+1} — ${rangeLast.getDate()}/${rangeLast.getMonth()+1}`
+  const inMonth    = dates.filter((d) => !isOutside(d));
+  const rangeLabel = inMonth.length
+    ? `${inMonth[0].getDate()}/${inMonth[0].getMonth()+1} — ${inMonth[inMonth.length-1].getDate()}/${inMonth[inMonth.length-1].getMonth()+1}`
     : "";
 
   return (
-    <div className="rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-700 shadow-lg flex flex-col">
+    <div className="rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-700 shadow-md bg-white dark:bg-slate-800">
 
-      {/* ── Header ── */}
-      <div className="flex items-center gap-3 px-4 py-3 bg-gradient-to-r from-slate-800 to-slate-700 dark:from-slate-950 dark:to-slate-900">
-        <span className="inline-flex items-center justify-center w-8 h-8 rounded-xl bg-indigo-500 text-white text-sm font-black flex-shrink-0 select-none shadow-sm">
+      {/* ── Week header ── */}
+      <div className="flex items-center gap-3 px-5 py-3 bg-gradient-to-r from-slate-800 to-slate-700 dark:from-slate-950 dark:to-slate-900 border-b border-slate-600/40">
+        <span className="inline-flex items-center justify-center w-8 h-8 rounded-xl bg-indigo-500 text-white text-sm font-black select-none shadow-sm flex-shrink-0">
           {weekIndex + 1}
         </span>
-        <div>
-          <p className="text-white text-sm font-bold leading-tight">Semana {weekIndex + 1}</p>
-          <p className="text-slate-400 text-xs leading-tight">{rangeLabel}</p>
+        <div className="flex-1 min-w-0">
+          <span className="text-white font-bold text-sm">Semana {weekIndex + 1}</span>
+          <span className="ml-3 text-slate-400 text-xs">{rangeLabel}</span>
         </div>
       </div>
 
-      {/* ── Table: days as rows, employees as columns ── */}
-      <div className="flex-1 overflow-x-auto bg-white dark:bg-slate-800">
-        <table className="w-full border-collapse">
+      {/* ── Main table: employees = rows, days = columns ── */}
+      <div className="overflow-x-auto">
+        <table className="w-full border-collapse" style={{ minWidth: "820px" }}>
 
-          {/* Employee column headers */}
+          {/* Day column headers */}
           <thead>
-            <tr className="border-b-2 border-slate-200 dark:border-slate-700">
-              {/* Day label column */}
-              <th className="w-[72px] bg-slate-50 dark:bg-slate-900 border-r border-slate-200 dark:border-slate-700" />
-
-              {/* One column per employee */}
-              {employees.map((emp, ei) => {
-                const c = EMPLOYEE_COLORS[ei % EMPLOYEE_COLORS.length];
+            <tr className="border-b border-slate-200 dark:border-slate-700">
+              {/* Employee column header */}
+              <th
+                className="py-2.5 px-4 text-left bg-slate-50 dark:bg-slate-900 border-r border-slate-200 dark:border-slate-700 text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest select-none"
+                style={{ width: "164px", minWidth: "164px" }}
+              >
+                Integrante
+              </th>
+              {dates.map((date, i) => {
+                const isWknd  = date.getDay() === 0 || date.getDay() === 6;
+                const outside = isOutside(date);
                 return (
                   <th
-                    key={emp.id}
-                    className={`py-3 px-3 border-r border-slate-200 dark:border-slate-700 last:border-r-0 ${c.bg}`}
+                    key={i}
+                    className={`py-2.5 px-2 text-center border-r border-slate-200 dark:border-slate-700 last:border-r-0 select-none
+                      ${isWknd ? "bg-indigo-50/60 dark:bg-indigo-900/20" : "bg-slate-50 dark:bg-slate-900"}
+                      ${outside ? "opacity-40" : ""}
+                    `}
+                    style={{ minWidth: "110px" }}
                   >
-                    <span className={`flex items-center justify-center gap-2 text-sm font-bold whitespace-nowrap ${c.text}`}>
-                      <span className={`inline-block w-2.5 h-2.5 rounded-full flex-shrink-0 ${c.dot}`} aria-hidden="true" />
-                      {emp.name}
-                    </span>
+                    <div className={`text-sm font-bold ${isWknd ? "text-indigo-600 dark:text-indigo-400" : "text-slate-700 dark:text-slate-300"}`}>
+                      {DAY_SHORT[i]}
+                    </div>
+                    <div className="text-[11px] text-slate-400 dark:text-slate-500 font-medium">
+                      {date.getDate()}/{date.getMonth()+1}
+                    </div>
                   </th>
                 );
               })}
             </tr>
           </thead>
 
-          {/* One row per day */}
+          {/* Employee rows */}
           <tbody>
-            {dates.map((date, di) => {
-              const dateStr = formatDate(date);
-              const isWknd  = date.getDay() === 0 || date.getDay() === 6;
-              const outside = isOutside(date);
+            {employees.map((emp, ei) => {
+              const row    = week.rows.find((r) => r.employeeId === emp.id);
+              const avatar = EMP_AVATAR[ei % EMP_AVATAR.length];
 
               return (
                 <tr
-                  key={dateStr}
-                  className={`
-                    border-b border-slate-100 dark:border-slate-700/60 last:border-b-0
-                    ${isWknd ? "bg-slate-50/80 dark:bg-slate-700/30" : ""}
-                    ${outside ? "opacity-30" : ""}
-                  `}
+                  key={emp.id}
+                  className="border-b border-slate-100 dark:border-slate-700/60 last:border-b-0 hover:bg-slate-50/50 dark:hover:bg-slate-700/20 transition-colors"
                 >
-                  {/* Day label */}
-                  <td className={`
-                    px-3 py-2 border-r border-slate-200 dark:border-slate-700 select-none
-                    bg-slate-50 dark:bg-slate-900 w-[72px]
-                  `}>
-                    <div className={`text-xs font-bold leading-tight ${isWknd ? "text-indigo-600 dark:text-indigo-400" : "text-slate-700 dark:text-slate-300"}`}>
-                      {DAY_SHORT[di]}
-                    </div>
-                    <div className="text-[11px] text-slate-400 dark:text-slate-500 leading-tight font-medium">
-                      {date.getDate()}/{date.getMonth()+1}
+                  {/* Employee info cell */}
+                  <td className="px-3 py-3 border-r border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
+                    <div className="flex items-center gap-3">
+                      {/* Avatar */}
+                      <div className={`inline-flex items-center justify-center w-9 h-9 rounded-full flex-shrink-0 text-sm font-black select-none shadow-sm ${avatar.ring} ${avatar.text}`}>
+                        {initials(emp.name)}
+                      </div>
+                      <span className="text-sm font-bold text-slate-800 dark:text-slate-100 truncate">
+                        {emp.name}
+                      </span>
                     </div>
                   </td>
 
-                  {/* Shift cell per employee */}
-                  {employees.map((emp) => {
-                    const row        = week.rows.find((r) => r.employeeId === emp.id);
+                  {/* Shift card cells — one per day */}
+                  {dates.map((date) => {
+                    const dateStr    = formatDate(date);
                     const assignment = row?.days[dateStr] ?? { shift: "FRANCO" };
                     return (
-                      <ShiftCell
-                        key={emp.id}
+                      <ShiftCardCell
+                        key={dateStr}
                         date={dateStr}
                         employeeId={emp.id}
                         assignment={assignment}
-                        dimmed={false}
+                        isWeekend={date.getDay() === 0 || date.getDay() === 6}
+                        dimmed={isOutside(date)}
                         onShiftChange={(eId, d, s, n) => onShiftChange(weekIndex, eId, d, s, n)}
                       />
                     );
@@ -163,7 +170,7 @@ function WeekCard({ week, weekIndex, employees, month, onShiftChange, onGuardCha
         </table>
       </div>
 
-      {/* ── Guard footer ── */}
+      {/* ── Guard section — completely separate from the table ── */}
       <GuardWeekFooter
         guards={week.guards}
         employees={employees}
