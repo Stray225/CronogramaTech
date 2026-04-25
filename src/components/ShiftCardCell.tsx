@@ -1,9 +1,10 @@
 "use client";
 
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { DayAssignment } from "@/types/schedule";
 
-// ── Per-employee card palette (index matches employee position in array) ───────
+// ── Per-employee card palette ─────────────────────────────────────────────────
 export const EMP_CARD_COLORS = [
   {
     cardBg:     "bg-sky-100 dark:bg-sky-900/60",
@@ -37,7 +38,7 @@ export const EMP_CARD_COLORS = [
   },
 ] as const;
 
-// ── Special shift colors (state-based, not person-based) ─────────────────────
+// ── Special shift colors ──────────────────────────────────────────────────────
 const SPECIAL_COLORS: Record<string, { cardBg: string; cardBorder: string; cardText: string; cardSub: string }> = {
   FERIADO:    { cardBg: "bg-red-100 dark:bg-red-900/50",    cardBorder: "border-l-[3px] border-red-500",    cardText: "text-red-950 dark:text-red-100",    cardSub: "text-red-600 dark:text-red-400" },
   VACACIONES: { cardBg: "bg-cyan-100 dark:bg-cyan-900/50",  cardBorder: "border-l-[3px] border-cyan-500",   cardText: "text-cyan-950 dark:text-cyan-100",  cardSub: "text-cyan-600 dark:text-cyan-400" },
@@ -45,57 +46,96 @@ const SPECIAL_COLORS: Record<string, { cardBg: string; cardBorder: string; cardT
   GUARDIA:    { cardBg: "bg-purple-100 dark:bg-purple-900/50",cardBorder:"border-l-[3px] border-purple-500",cardText:"text-purple-950 dark:text-purple-100",cardSub:"text-purple-600 dark:text-purple-400"},
 };
 
-// ── 3 primary shift blocks (used in the selector only) ───────────────────────
 export const PRIMARY_SHIFTS = [
   { code: "06:00-16:00", label: "06:00 – 16:00", tag: "Mañana", hours: "10h" },
   { code: "09:00-17:00", label: "09:00 – 17:00", tag: "Media",  hours: "8h"  },
   { code: "14:00-22:00", label: "14:00 – 22:00", tag: "Tarde",  hours: "8h"  },
 ] as const;
 
-function isSpecial(code: string) {
-  return code in SPECIAL_COLORS;
-}
+function isSpecial(code: string) { return code in SPECIAL_COLORS; }
 
-// ── Props ────────────────────────────────────────────────────────────────────
+// ── Props ─────────────────────────────────────────────────────────────────────
 interface ShiftCardCellProps {
   date:          string;
   employeeId:    string;
-  empColorIdx:   number;          // position of this employee in the array
+  empColorIdx:   number;
   assignment:    DayAssignment;
   isWeekend:     boolean;
   dimmed?:       boolean;
   onShiftChange: (employeeId: string, date: string, shift: string, note?: string) => void;
 }
 
-function ShiftCardCell({ date, employeeId, empColorIdx, assignment, isWeekend, dimmed = false, onShiftChange }: ShiftCardCellProps) {
+function ShiftCardCell({
+  date, employeeId, empColorIdx, assignment, isWeekend, dimmed = false, onShiftChange,
+}: ShiftCardCellProps) {
   const [open,      setOpen]      = useState(false);
   const [noteInput, setNoteInput] = useState(assignment.note ?? "");
   const [showNote,  setShowNote]  = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+
+  // Position of the dropdown (fixed, calculated from trigger bounding rect)
+  const [dropPos, setDropPos] = useState<{
+    top?: number; bottom?: number; left: number; openDown: boolean;
+  } | null>(null);
+  const DROPDOWN_H = 300; // approximate height in px
+
+  const triggerRef = useRef<HTMLDivElement>(null);
+  const dropRef    = useRef<HTMLDivElement>(null);
 
   useEffect(() => { setNoteInput(assignment.note ?? ""); }, [assignment.note]);
+
+  // Close on outside click
   useEffect(() => {
     if (!open) return;
-    const fn = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) { setOpen(false); setShowNote(false); }
-    };
-    document.addEventListener("mousedown", fn);
-    return () => document.removeEventListener("mousedown", fn);
+    function onDown(e: MouseEvent) {
+      const target = e.target as Node;
+      if (
+        triggerRef.current && !triggerRef.current.contains(target) &&
+        dropRef.current   && !dropRef.current.contains(target)
+      ) {
+        setOpen(false);
+        setShowNote(false);
+      }
+    }
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
   }, [open]);
+
+  // Close on scroll so the dropdown doesn't drift
+  useEffect(() => {
+    if (!open) return;
+    const onScroll = () => { setOpen(false); setShowNote(false); };
+    window.addEventListener("scroll", onScroll, true);
+    return () => window.removeEventListener("scroll", onScroll, true);
+  }, [open]);
+
+  const openDropdown = useCallback(() => {
+    if (!triggerRef.current) return;
+    const rect      = triggerRef.current.getBoundingClientRect();
+    const spaceDown = window.innerHeight - rect.bottom;
+    const spaceUp   = rect.top;
+    const openDown  = spaceDown >= DROPDOWN_H || spaceDown >= spaceUp;
+    setDropPos(
+      openDown
+        ? { top: rect.bottom + 4, left: rect.left, openDown: true }
+        : { bottom: window.innerHeight - rect.top + 4, left: rect.left, openDown: false },
+    );
+    setOpen((v) => !v);
+  }, [DROPDOWN_H]);
 
   function pick(code: string) {
     onShiftChange(employeeId, date, code, noteInput || undefined);
     if (code === "CUMPLEAÑOS" || code === "FERIADO") setShowNote(true);
     else { setOpen(false); setShowNote(false); }
   }
+
   function saveNote() {
     onShiftChange(employeeId, date, assignment.shift, noteInput || undefined);
-    setOpen(false); setShowNote(false);
+    setOpen(false);
+    setShowNote(false);
   }
 
   const isFranco  = assignment.shift === "FRANCO";
   const special   = isSpecial(assignment.shift) ? SPECIAL_COLORS[assignment.shift] : null;
-  // Regular working shift → employee color; special state → its own color; FRANCO → empty
   const empColor  = EMP_CARD_COLORS[empColorIdx % EMP_CARD_COLORS.length];
   const cardColor = special ?? (isFranco ? null : empColor);
 
@@ -112,13 +152,14 @@ function ShiftCardCell({ date, employeeId, empColorIdx, assignment, isWeekend, d
     >
       {/* ── Shift card or empty zone ── */}
       <div
+        ref={triggerRef}
         role="button"
         tabIndex={0}
         aria-label={`${assignment.shift} — clic para cambiar`}
         aria-expanded={open}
         aria-haspopup="listbox"
-        onClick={() => setOpen((v) => !v)}
-        onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && setOpen((v) => !v)}
+        onClick={openDropdown}
+        onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && openDropdown()}
         className={`
           min-h-[52px] rounded-lg w-full cursor-pointer transition-all duration-100 select-none
           ${cardColor
@@ -140,14 +181,22 @@ function ShiftCardCell({ date, employeeId, empColorIdx, assignment, isWeekend, d
         )}
       </div>
 
-      {/* ── Selector — opens UPWARD ── */}
-      {open && (
+      {/* ── Dropdown — rendered via portal so it never overlaps table rows ── */}
+      {open && dropPos && typeof document !== "undefined" && createPortal(
         <div
-          ref={ref}
+          ref={dropRef}
           role="listbox"
-          className="absolute z-50 bottom-full left-0 mb-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-2xl w-64 overflow-hidden animate-slide-down"
+          style={{
+            position: "fixed",
+            ...(dropPos.openDown
+              ? { top:    dropPos.top }
+              : { bottom: dropPos.bottom }),
+            left:   dropPos.left,
+            zIndex: 9999,
+          }}
+          className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-2xl w-64 overflow-hidden animate-slide-down"
         >
-          {/* 3 primary blocks — colored by employee */}
+          {/* Primary shifts */}
           <div className="p-3 space-y-1.5">
             <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-2">Turno</p>
             {PRIMARY_SHIFTS.map((s) => {
@@ -184,12 +233,12 @@ function ShiftCardCell({ date, employeeId, empColorIdx, assignment, isWeekend, d
             <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-2">Especiales</p>
             <div className="grid grid-cols-2 gap-1.5">
               {[
-                { code: "FRANCO",     label: "Libre",       cls: "bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300" },
-                { code: "08:00-20:00",label: "08–20 (Wknd)",cls: "bg-blue-50   dark:bg-blue-900/40   text-blue-700   dark:text-blue-300" },
-                { code: "FERIADO",    label: "Feriado",     cls: "bg-red-50    dark:bg-red-900/40    text-red-700    dark:text-red-300" },
-                { code: "VACACIONES", label: "Vacaciones",  cls: "bg-cyan-50   dark:bg-cyan-900/40   text-cyan-700   dark:text-cyan-300" },
-                { code: "CUMPLEAÑOS", label: "Cumpleaños",  cls: "bg-pink-50   dark:bg-pink-900/40   text-pink-700   dark:text-pink-300" },
-                { code: "13:00-22:00",label: "13–22",       cls: "bg-slate-100 dark:bg-slate-700     text-slate-600  dark:text-slate-300" },
+                { code: "FRANCO",      label: "Libre",        cls: "bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300" },
+                { code: "08:00-20:00", label: "08–20 (Wknd)", cls: "bg-blue-50   dark:bg-blue-900/40   text-blue-700   dark:text-blue-300" },
+                { code: "FERIADO",     label: "Feriado",      cls: "bg-red-50    dark:bg-red-900/40    text-red-700    dark:text-red-300" },
+                { code: "VACACIONES",  label: "Vacaciones",   cls: "bg-cyan-50   dark:bg-cyan-900/40   text-cyan-700   dark:text-cyan-300" },
+                { code: "CUMPLEAÑOS",  label: "Cumpleaños",   cls: "bg-pink-50   dark:bg-pink-900/40   text-pink-700   dark:text-pink-300" },
+                { code: "13:00-22:00", label: "13–22",        cls: "bg-slate-100 dark:bg-slate-700     text-slate-600  dark:text-slate-300" },
               ].map((opt) => (
                 <button
                   key={opt.code}
@@ -208,16 +257,25 @@ function ShiftCardCell({ date, employeeId, empColorIdx, assignment, isWeekend, d
           {showNote && (
             <div className="border-t border-slate-100 dark:border-slate-700 p-3 flex gap-2">
               <input
-                autoFocus type="text" aria-label="Nota" placeholder="Nota opcional..."
+                autoFocus
+                type="text"
+                aria-label="Nota"
+                placeholder="Nota opcional..."
                 value={noteInput}
                 onChange={(e) => setNoteInput(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && saveNote()}
                 className="flex-1 border border-slate-300 dark:border-slate-600 rounded-lg px-2 py-1.5 text-xs bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-400"
               />
-              <button onClick={saveNote} className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg px-3 py-1.5 text-xs font-bold transition-colors">OK</button>
+              <button
+                onClick={saveNote}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg px-3 py-1.5 text-xs font-bold transition-colors"
+              >
+                OK
+              </button>
             </div>
           )}
-        </div>
+        </div>,
+        document.body
       )}
     </td>
   );

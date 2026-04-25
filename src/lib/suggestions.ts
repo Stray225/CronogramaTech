@@ -8,26 +8,60 @@ import {
 } from "./dateUtils";
 import { countHistoricalGuards } from "./scheduleRules";
 
-// ── Per-employee weekday shift preference ─────────────────────────────────────
-// Keyed by employee ID. Falls back to DEFAULT_WEEKDAY for unknown IDs.
+// ── Day-of-week constants ─────────────────────────────────────────────────────
+// 0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat
+type DayOfWeek = 0 | 1 | 2 | 3 | 4 | 5 | 6;
 
-const WEEKDAY_SHIFT: Record<string, string> = {
-  pazos:   "13:00-22:00", // shifts ending at 22:00
-  albalat: "06:00-16:00", // shifts ending at 16:00
-  rawson:  "06:00-16:00", // shifts ending at 16:00
+// ── Base schedule (when NOT working the weekend rotation) ─────────────────────
+// Any day not listed → FRANCO
+const BASE_SCHEDULE: Record<string, Partial<Record<DayOfWeek, string>>> = {
+  albalat: {
+    1: "13:00-22:00", // Mon
+    2: "13:00-22:00", // Tue
+  },
+  rawson: {
+    1: "06:00-16:00", // Mon
+    2: "06:00-16:00", // Tue
+    3: "06:00-16:00", // Wed
+    4: "06:00-16:00", // Thu
+  },
+  pazos: {
+    3: "14:00-22:00", // Wed
+    4: "14:00-22:00", // Thu
+    5: "14:00-22:00", // Fri
+  },
 };
 
-const DEFAULT_WEEKDAY = "06:00-16:00";
-const WEEKEND_SHIFT   = "08:00-20:00";
+// ── Weekend-worker schedule (when this employee IS on weekend rotation) ────────
+// Replaces BASE_SCHEDULE entirely for that week.
+// Any day not listed → FRANCO.
+// Compensation: drop Thu–Fri to balance the extra Sat+Sun.
+const WEEKEND_SCHEDULE: Record<string, Partial<Record<DayOfWeek, string>>> = {
+  albalat: {
+    1: "13:00-22:00", // Mon
+    2: "13:00-22:00", // Tue
+    6: "08:00-20:00", // Sat
+    0: "08:00-20:00", // Sun
+  },
+  rawson: {
+    1: "06:00-16:00", // Mon
+    2: "06:00-16:00", // Tue
+    3: "06:00-16:00", // Wed
+    6: "08:00-20:00", // Sat
+    0: "08:00-20:00", // Sun
+    // Thu–Fri → FRANCO as compensation
+  },
+  pazos: {
+    3: "14:00-22:00", // Wed
+    6: "08:00-20:00", // Sat
+    0: "08:00-20:00", // Sun
+  },
+};
 
-function weekdayShiftFor(employeeId: string): string {
-  return WEEKDAY_SHIFT[employeeId] ?? DEFAULT_WEEKDAY;
-}
+// All 3 employees rotate weekends
+const WEEKEND_ELIGIBLE = new Set(["albalat", "rawson", "pazos"]);
 
-/**
- * Count weekend shifts per employee across historical schedules.
- * Used for fair weekend rotation (fewest first).
- */
+// ── Count weekend shifts per employee across history ──────────────────────────
 function countHistoricalWeekends(
   history: readonly MonthSchedule[],
   employees: readonly Employee[],
@@ -40,7 +74,11 @@ function countHistoricalWeekends(
       for (const row of week.rows) {
         for (const [dateStr, assignment] of Object.entries(row.days)) {
           const date = new Date(dateStr + "T00:00:00");
-          if (isWeekend(date) && assignment.shift !== "FRANCO" && row.employeeId in counts) {
+          if (
+            isWeekend(date) &&
+            assignment.shift !== "FRANCO" &&
+            row.employeeId in counts
+          ) {
             counts[row.employeeId]++;
           }
         }
@@ -51,13 +89,15 @@ function countHistoricalWeekends(
 }
 
 /**
- * Generate a full monthly schedule using employee-specific shift rules.
+ * Generate a full monthly schedule using per-employee, per-day-of-week rules.
  *
  * Algorithm:
- * - Weekdays (Mon–Fri): each employee gets their configured shift (WEEKDAY_SHIFT).
- * - Weekends (Sat–Sun): one employee covers weekend shifts, rotating every 2 weeks
- *   based on historical weekend count (fewest first). Others get FRANCO.
- * - Guards: one employee per week, rotating weekly by historical guard count (fewest first).
+ * - Each employee has a BASE_SCHEDULE (days worked Mon–Fri when not on weekend).
+ * - Weekend rotation is only among WEEKEND_ELIGIBLE employees (albalat, pazos).
+ *   Rotation happens every 2 weeks, fairness-ordered by historical weekend count.
+ * - Weekend worker uses WEEKEND_SCHEDULE for that week (works Sat+Sun, skips some weekdays).
+ * - Rawson always follows BASE_SCHEDULE and is never assigned weekends.
+ * - Guards: one employee per week, rotating by fewest historical guards (all 3 eligible).
  */
 export function suggestMonth(
   year: number,
@@ -68,11 +108,14 @@ export function suggestMonth(
   const historicGuards   = countHistoricalGuards(history, employees);
   const historicWeekends = countHistoricalWeekends(history, employees);
 
-  // Sort by fewest guards / weekends for fair rotation
-  const sortedByGuards   = [...employees].sort(
+  // For guards: sort ALL employees by fewest guard count
+  const sortedByGuards = [...employees].sort(
     (a, b) => (historicGuards[a.id] ?? 0) - (historicGuards[b.id] ?? 0),
   );
-  const sortedByWeekends = [...employees].sort(
+
+  // For weekends: only eligible employees, sorted by fewest weekends
+  const eligibleForWeekend = employees.filter((e) => WEEKEND_ELIGIBLE.has(e.id));
+  const sortedByWeekends   = [...eligibleForWeekend].sort(
     (a, b) => (historicWeekends[a.id] ?? 0) - (historicWeekends[b.id] ?? 0),
   );
 
@@ -81,28 +124,25 @@ export function suggestMonth(
   const weeks = rawWeeks.map((week, weekIndex) => {
     const dates = getDatesInWeek(week.start);
 
-    // Weekend rotation: same person for 2 consecutive weeks, then next
-    const weekendEmp = sortedByWeekends[Math.floor(weekIndex / 2) % sortedByWeekends.length];
+    // Weekend rotation: same person covers 2 consecutive weeks, then next
+    const weekendEmp = sortedByWeekends[
+      Math.floor(weekIndex / 2) % sortedByWeekends.length
+    ];
 
     // Build shift rows per employee
     const rows: WeekRow[] = employees.map((emp) => {
-      const days: Record<string, { shift: string }> = {};
       const isWeekendWorker = emp.id === weekendEmp.id;
+      const schedule =
+        isWeekendWorker && WEEKEND_SCHEDULE[emp.id]
+          ? WEEKEND_SCHEDULE[emp.id]
+          : BASE_SCHEDULE[emp.id] ?? {};
 
+      const days: Record<string, { shift: string }> = {};
       for (const date of dates) {
-        const dateStr  = formatDate(date);
-        const dayOfWeek = date.getDay(); // 0=Sun,1=Mon,...,4=Thu,5=Fri,6=Sat
-
-        if (isWeekend(date)) {
-          // Sat + Sun: only the weekend employee works
-          days[dateStr] = { shift: isWeekendWorker ? WEEKEND_SHIFT : "FRANCO" };
-        } else if (isWeekendWorker && (dayOfWeek === 4 || dayOfWeek === 5)) {
-          // Thu + Fri: the weekend employee rests (compensates for Sat+Sun)
-          days[dateStr] = { shift: "FRANCO" };
-        } else {
-          // Mon–Wed (and Thu–Fri for non-weekend employees): normal weekday shift
-          days[dateStr] = { shift: weekdayShiftFor(emp.id) };
-        }
+        const dateStr   = formatDate(date);
+        const dow       = date.getDay() as DayOfWeek;
+        const shift     = schedule[dow] ?? "FRANCO";
+        days[dateStr]   = { shift };
       }
 
       return { employeeId: emp.id, days };

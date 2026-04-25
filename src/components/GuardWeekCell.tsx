@@ -1,43 +1,77 @@
 "use client";
 
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Employee, GuardDay } from "@/types/schedule";
 import { GUARD_TIME_WEEKDAY, GUARD_TIME_WEEKEND } from "@/constants/app";
 
 interface GuardWeekFooterProps {
-  guards:         readonly GuardDay[];
-  employees:      readonly Employee[];
-  onGuardChange:  (employeeId: string | null) => void;
+  guards:        readonly GuardDay[];
+  employees:     readonly Employee[];
+  onGuardChange: (employeeId: string | null) => void;
 }
 
-/** Renders as a <div> footer below the week card table — not inside a <td>. */
 function GuardWeekFooter({ guards, employees, onGuardChange }: GuardWeekFooterProps) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const [dropPos, setDropPos] = useState<{
+    top?: number; bottom?: number; left: number; width: number; openDown: boolean;
+  } | null>(null);
+  const DROPDOWN_H = 220;
+
+  const triggerRef = useRef<HTMLDivElement>(null);
+  const dropRef    = useRef<HTMLDivElement>(null);
 
   const assignedId = guards.find((g) => g.employeeId !== null)?.employeeId ?? null;
   const employee   = employees.find((e) => e.id === assignedId) ?? null;
 
+  // Close on outside click
   useEffect(() => {
     if (!open) return;
     function onDown(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      if (
+        triggerRef.current && !triggerRef.current.contains(target) &&
+        dropRef.current    && !dropRef.current.contains(target)
+      ) setOpen(false);
     }
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
   }, [open]);
 
+  // Close on scroll
+  useEffect(() => {
+    if (!open) return;
+    const onScroll = () => setOpen(false);
+    window.addEventListener("scroll", onScroll, true);
+    return () => window.removeEventListener("scroll", onScroll, true);
+  }, [open]);
+
+  const openDropdown = useCallback(() => {
+    if (!triggerRef.current) return;
+    const rect      = triggerRef.current.getBoundingClientRect();
+    const spaceDown = window.innerHeight - rect.bottom;
+    const spaceUp   = rect.top;
+    const openDown  = spaceDown >= DROPDOWN_H || spaceDown >= spaceUp;
+    setDropPos(
+      openDown
+        ? { top: rect.bottom + 4, left: rect.left, width: rect.width, openDown: true }
+        : { bottom: window.innerHeight - rect.top + 4, left: rect.left, width: rect.width, openDown: false },
+    );
+    setOpen((v) => !v);
+  }, [DROPDOWN_H]);
+
   return (
     <div className="relative border-t-2 border-pink-200 dark:border-pink-900">
       {/* Trigger bar */}
       <div
+        ref={triggerRef}
         role="button"
         tabIndex={0}
         aria-label={`Guardia semanal: ${employee ? employee.name : "Sin asignar"}. Clic para cambiar.`}
         aria-expanded={open}
         aria-haspopup="listbox"
-        onClick={() => setOpen((v) => !v)}
-        onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && setOpen((v) => !v)}
+        onClick={openDropdown}
+        onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && openDropdown()}
         className={`
           w-full flex items-center gap-3 px-4 py-3
           bg-pink-50 dark:bg-pink-950/50
@@ -71,18 +105,31 @@ function GuardWeekFooter({ guards, employees, onGuardChange }: GuardWeekFooterPr
           )}
         </div>
 
-        <svg className="w-4 h-4 text-pink-400 dark:text-pink-600 flex-shrink-0 transition-transform duration-150" style={{ transform: open ? "rotate(180deg)" : "none" }} fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden="true">
+        <svg
+          className="w-4 h-4 text-pink-400 dark:text-pink-600 flex-shrink-0 transition-transform duration-150"
+          style={{ transform: open ? "rotate(180deg)" : "none" }}
+          fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden="true"
+        >
           <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7"/>
         </svg>
       </div>
 
-      {/* Dropdown — opens upward */}
-      {open && (
+      {/* Dropdown — portal so it never overlaps table content */}
+      {open && dropPos && typeof document !== "undefined" && createPortal(
         <div
-          ref={ref}
+          ref={dropRef}
           role="listbox"
           aria-label="Seleccionar guardia semanal"
-          className="absolute z-50 bottom-full left-0 mb-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-2xl w-56 overflow-hidden animate-slide-down"
+          style={{
+            position: "fixed",
+            ...(dropPos.openDown
+              ? { top:    dropPos.top }
+              : { bottom: dropPos.bottom }),
+            left:     dropPos.left,
+            minWidth: dropPos.width,
+            zIndex:   9999,
+          }}
+          className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-2xl w-56 overflow-hidden animate-slide-down"
         >
           <div className="py-1">
             <div className="px-3 py-1.5 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">
@@ -115,7 +162,8 @@ function GuardWeekFooter({ guards, employees, onGuardChange }: GuardWeekFooterPr
               </button>
             ))}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
