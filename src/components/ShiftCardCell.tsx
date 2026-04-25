@@ -47,9 +47,9 @@ const SPECIAL_COLORS: Record<string, { cardBg: string; cardBorder: string; cardT
 };
 
 export const PRIMARY_SHIFTS = [
-  { code: "06:00-16:00", label: "06:00 – 16:00", tag: "Mañana", hours: "10h" },
-  { code: "09:00-17:00", label: "09:00 – 17:00", tag: "Media",  hours: "8h"  },
-  { code: "14:00-22:00", label: "14:00 – 22:00", tag: "Tarde",  hours: "8h"  },
+  { code: "06:00-14:00", label: "06:00 – 14:00", tag: "Mañana", hours: "8h" },
+  { code: "09:00-17:00", label: "09:00 – 17:00", tag: "Media",  hours: "8h" },
+  { code: "14:00-22:00", label: "14:00 – 22:00", tag: "Tarde",  hours: "8h" },
 ] as const;
 
 function isSpecial(code: string) { return code in SPECIAL_COLORS; }
@@ -238,7 +238,7 @@ function ShiftCardCell({
                 { code: "FERIADO",     label: "Feriado",      cls: "bg-red-50    dark:bg-red-900/40    text-red-700    dark:text-red-300" },
                 { code: "VACACIONES",  label: "Vacaciones",   cls: "bg-cyan-50   dark:bg-cyan-900/40   text-cyan-700   dark:text-cyan-300" },
                 { code: "CUMPLEAÑOS",  label: "Cumpleaños",   cls: "bg-pink-50   dark:bg-pink-900/40   text-pink-700   dark:text-pink-300" },
-                { code: "13:00-22:00", label: "13–22",        cls: "bg-slate-100 dark:bg-slate-700     text-slate-600  dark:text-slate-300" },
+                { code: "06:00-14:00", label: "06–14 extra",  cls: "bg-slate-100 dark:bg-slate-700     text-slate-600  dark:text-slate-300" },
               ].map((opt) => (
                 <button
                   key={opt.code}

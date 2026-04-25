@@ -1,8 +1,8 @@
 import { Employee } from "@/types/schedule";
 
-// Order matters for row display — Pazos last (works latest shift)
+// Order matters for row display
 export const EMPLOYEES: Employee[] = [
   { id: "albalat", name: "Albalat" },
-  { id: "rawson",  name: "Rawson Paz" },
   { id: "pazos",   name: "Pazos" },
+  { id: "rawson",  name: "Rawson Paz" },
 ];

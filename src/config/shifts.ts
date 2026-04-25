@@ -117,11 +117,20 @@ export function getShift(code: string): ShiftDefinition {
 
 export const WEEK_PATTERNS: Record<string, Record<string, string>> = {
   MAÑANA: {
-    monday: "06:00-16:00",
-    tuesday: "06:00-16:00",
-    wednesday: "06:00-16:00",
-    thursday: "06:00-16:00",
-    friday: "06:00-16:00",
+    monday: "06:00-14:00",
+    tuesday: "06:00-14:00",
+    wednesday: "06:00-14:00",
+    thursday: "06:00-14:00",
+    friday: "06:00-14:00",
+    saturday: "FRANCO",
+    sunday: "FRANCO",
+  },
+  MEDIA: {
+    monday: "09:00-17:00",
+    tuesday: "09:00-17:00",
+    wednesday: "09:00-17:00",
+    thursday: "09:00-17:00",
+    friday: "09:00-17:00",
     saturday: "FRANCO",
     sunday: "FRANCO",
   },
@@ -134,15 +143,6 @@ export const WEEK_PATTERNS: Record<string, Record<string, string>> = {
     saturday: "08:00-20:00",
     sunday: "08:00-20:00",
   },
-  MIXTO: {
-    monday: "13:00-22:00",
-    tuesday: "13:00-22:00",
-    wednesday: "FRANCO",
-    thursday: "FRANCO",
-    friday: "FRANCO",
-    saturday: "08:00-20:00",
-    sunday: "08:00-20:00",
-  },
 };
 
-export const PATTERN_NAMES = ["MAÑANA", "TARDE", "MIXTO"] as const;
+export const PATTERN_NAMES = ["MAÑANA", "MEDIA", "TARDE"] as const;

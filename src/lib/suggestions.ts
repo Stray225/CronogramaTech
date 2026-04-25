@@ -16,19 +16,19 @@ type DayOfWeek = 0 | 1 | 2 | 3 | 4 | 5 | 6;
 // Any day not listed → FRANCO
 const BASE_SCHEDULE: Record<string, Partial<Record<DayOfWeek, string>>> = {
   albalat: {
-    1: "13:00-22:00", // Mon
-    2: "13:00-22:00", // Tue
-  },
-  rawson: {
-    1: "06:00-16:00", // Mon
-    2: "06:00-16:00", // Tue
-    3: "06:00-16:00", // Wed
-    4: "06:00-16:00", // Thu
+    1: "14:00-22:00", // Mon
+    2: "14:00-22:00", // Tue
   },
   pazos: {
     3: "14:00-22:00", // Wed
     4: "14:00-22:00", // Thu
     5: "14:00-22:00", // Fri
+  },
+  rawson: {
+    1: "06:00-14:00", // Mon
+    2: "06:00-14:00", // Tue
+    3: "06:00-14:00", // Wed
+    4: "06:00-14:00", // Thu
   },
 };
 
@@ -38,23 +38,25 @@ const BASE_SCHEDULE: Record<string, Partial<Record<DayOfWeek, string>>> = {
 // Compensation: drop Thu–Fri to balance the extra Sat+Sun.
 const WEEKEND_SCHEDULE: Record<string, Partial<Record<DayOfWeek, string>>> = {
   albalat: {
-    1: "13:00-22:00", // Mon
-    2: "13:00-22:00", // Tue
+    1: "14:00-22:00", // Mon
+    2: "14:00-22:00", // Tue
     6: "08:00-20:00", // Sat
     0: "08:00-20:00", // Sun
-  },
-  rawson: {
-    1: "06:00-16:00", // Mon
-    2: "06:00-16:00", // Tue
-    3: "06:00-16:00", // Wed
-    6: "08:00-20:00", // Sat
-    0: "08:00-20:00", // Sun
-    // Thu–Fri → FRANCO as compensation
+    // Wed–Fri → FRANCO as compensation
   },
   pazos: {
     3: "14:00-22:00", // Wed
     6: "08:00-20:00", // Sat
     0: "08:00-20:00", // Sun
+    // Mon–Tue, Thu–Fri → FRANCO as compensation
+  },
+  rawson: {
+    1: "06:00-14:00", // Mon
+    2: "06:00-14:00", // Tue
+    3: "06:00-14:00", // Wed
+    6: "08:00-20:00", // Sat
+    0: "08:00-20:00", // Sun
+    // Thu–Fri → FRANCO as compensation
   },
 };
 
