@@ -27,6 +27,8 @@ export interface ShiftDefinition {
 export interface DayAssignment {
   readonly shift: string;
   readonly note?: string;
+  /** Free-text coverage info for FERIADO / CUMPLEAÑOS days (e.g. "Rawson 06:00-14:00"). */
+  readonly coverage?: string;
 }
 
 /** Guard duty for a single calendar day. */
@@ -89,7 +91,8 @@ export function isDayAssignment(value: unknown): value is DayAssignment {
   const v = value as Record<string, unknown>;
   return (
     typeof v["shift"] === "string" &&
-    (v["note"] === undefined || typeof v["note"] === "string")
+    (v["note"]     === undefined || typeof v["note"]     === "string") &&
+    (v["coverage"] === undefined || typeof v["coverage"] === "string")
   );
 }
 

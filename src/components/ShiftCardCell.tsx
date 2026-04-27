@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useEffect, useRef, useState, useCallback } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { DayAssignment } from "@/types/schedule";
 
@@ -46,6 +46,9 @@ const SPECIAL_COLORS: Record<string, { cardBg: string; cardBorder: string; cardT
   GUARDIA:    { cardBg: "bg-purple-100 dark:bg-purple-900/50",cardBorder:"border-l-[3px] border-purple-500",cardText:"text-purple-950 dark:text-purple-100",cardSub:"text-purple-600 dark:text-purple-400"},
 };
 
+// Shifts that can have a coverage note
+const COVERAGE_SHIFTS = new Set(["FERIADO", "CUMPLEAÑOS"]);
+
 export const PRIMARY_SHIFTS = [
   { code: "06:00-14:00", label: "06:00 – 14:00", tag: "Mañana", hours: "8h" },
   { code: "09:00-17:00", label: "09:00 – 17:00", tag: "Media",  hours: "8h" },
@@ -62,51 +65,56 @@ interface ShiftCardCellProps {
   assignment:    DayAssignment;
   isWeekend:     boolean;
   dimmed?:       boolean;
-  onShiftChange: (employeeId: string, date: string, shift: string, note?: string) => void;
+  onShiftChange: (employeeId: string, date: string, shift: string, note?: string, coverage?: string) => void;
 }
 
 function ShiftCardCell({
   date, employeeId, empColorIdx, assignment, isWeekend, dimmed = false, onShiftChange,
 }: ShiftCardCellProps) {
-  const [open,      setOpen]      = useState(false);
-  const [noteInput, setNoteInput] = useState(assignment.note ?? "");
-  const [showNote,  setShowNote]  = useState(false);
+  const [open,             setOpen]             = useState(false);
+  const [noteInput,        setNoteInput]        = useState(assignment.note ?? "");
+  const [showNote,         setShowNote]         = useState(false);
+  const [coverageInput,    setCoverageInput]    = useState(assignment.coverage ?? "");
+  const [editingCoverage,  setEditingCoverage]  = useState(false);
 
-  // Position of the dropdown (fixed, calculated from trigger bounding rect)
   const [dropPos, setDropPos] = useState<{
     top?: number; bottom?: number; left: number; openDown: boolean;
   } | null>(null);
-  const DROPDOWN_H = 300; // approximate height in px
+  const DROPDOWN_H = 300;
 
-  const triggerRef = useRef<HTMLDivElement>(null);
-  const dropRef    = useRef<HTMLDivElement>(null);
+  const triggerRef   = useRef<HTMLDivElement>(null);
+  const dropRef      = useRef<HTMLDivElement>(null);
+  const coverageRef  = useRef<HTMLInputElement>(null);
 
-  useEffect(() => { setNoteInput(assignment.note ?? ""); }, [assignment.note]);
+  useEffect(() => { setNoteInput(assignment.note ?? ""); },        [assignment.note]);
+  useEffect(() => { setCoverageInput(assignment.coverage ?? ""); }, [assignment.coverage]);
 
-  // Close on outside click
+  // Close dropdown on outside click
   useEffect(() => {
     if (!open) return;
     function onDown(e: MouseEvent) {
       const target = e.target as Node;
       if (
         triggerRef.current && !triggerRef.current.contains(target) &&
-        dropRef.current   && !dropRef.current.contains(target)
-      ) {
-        setOpen(false);
-        setShowNote(false);
-      }
+        dropRef.current    && !dropRef.current.contains(target)
+      ) { setOpen(false); setShowNote(false); }
     }
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
   }, [open]);
 
-  // Close on scroll so the dropdown doesn't drift
+  // Close dropdown on scroll
   useEffect(() => {
     if (!open) return;
     const onScroll = () => { setOpen(false); setShowNote(false); };
     window.addEventListener("scroll", onScroll, true);
     return () => window.removeEventListener("scroll", onScroll, true);
   }, [open]);
+
+  // Auto-focus coverage input
+  useEffect(() => {
+    if (editingCoverage) coverageRef.current?.focus();
+  }, [editingCoverage]);
 
   const openDropdown = useCallback(() => {
     if (!triggerRef.current) return;
@@ -123,21 +131,27 @@ function ShiftCardCell({
   }, [DROPDOWN_H]);
 
   function pick(code: string) {
-    onShiftChange(employeeId, date, code, noteInput || undefined);
-    if (code === "CUMPLEAÑOS" || code === "FERIADO") setShowNote(true);
+    onShiftChange(employeeId, date, code, noteInput || undefined, coverageInput || undefined);
+    if (COVERAGE_SHIFTS.has(code)) setShowNote(true);
     else { setOpen(false); setShowNote(false); }
   }
 
   function saveNote() {
-    onShiftChange(employeeId, date, assignment.shift, noteInput || undefined);
+    onShiftChange(employeeId, date, assignment.shift, noteInput || undefined, coverageInput || undefined);
     setOpen(false);
     setShowNote(false);
   }
 
-  const isFranco  = assignment.shift === "FRANCO";
-  const special   = isSpecial(assignment.shift) ? SPECIAL_COLORS[assignment.shift] : null;
-  const empColor  = EMP_CARD_COLORS[empColorIdx % EMP_CARD_COLORS.length];
-  const cardColor = special ?? (isFranco ? null : empColor);
+  function saveCoverage() {
+    onShiftChange(employeeId, date, assignment.shift, assignment.note, coverageInput || undefined);
+    setEditingCoverage(false);
+  }
+
+  const isFranco    = assignment.shift === "FRANCO";
+  const hasCoverage = COVERAGE_SHIFTS.has(assignment.shift);
+  const special     = isSpecial(assignment.shift) ? SPECIAL_COLORS[assignment.shift] : null;
+  const empColor    = EMP_CARD_COLORS[empColorIdx % EMP_CARD_COLORS.length];
+  const cardColor   = special ?? (isFranco ? null : empColor);
 
   const display = /^\d\d:/.test(assignment.shift)
     ? assignment.shift.replace("-", " – ")
@@ -150,7 +164,7 @@ function ShiftCardCell({
         ${dimmed ? "opacity-30" : ""}
       `}
     >
-      {/* ── Shift card or empty zone ── */}
+      {/* ── Shift card ── */}
       <div
         ref={triggerRef}
         role="button"
@@ -181,20 +195,57 @@ function ShiftCardCell({
         )}
       </div>
 
-      {/* ── Dropdown — rendered via portal so it never overlaps table rows ── */}
+      {/* ── Coverage row (only for FERIADO / CUMPLEAÑOS) ── */}
+      {hasCoverage && !dimmed && (
+        <div
+          role="button"
+          tabIndex={0}
+          aria-label="Quién cubre este día"
+          onClick={(e) => { e.stopPropagation(); setEditingCoverage(true); }}
+          onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && setEditingCoverage(true)}
+          className="mt-1 px-2 py-1 rounded-md border border-dashed border-slate-300 dark:border-slate-600
+            bg-white/70 dark:bg-slate-900/40 cursor-text hover:border-indigo-400 transition-colors"
+        >
+          {editingCoverage ? (
+            <input
+              ref={coverageRef}
+              type="text"
+              value={coverageInput}
+              placeholder="¿Quién cubre? ej: Rawson 06-14"
+              onChange={(e) => setCoverageInput(e.target.value)}
+              onBlur={saveCoverage}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") saveCoverage();
+                if (e.key === "Escape") setEditingCoverage(false);
+                e.stopPropagation();
+              }}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full text-[10px] bg-transparent border-none outline-none text-slate-700 dark:text-slate-200 placeholder:text-slate-400"
+            />
+          ) : (
+            <span className={`text-[10px] leading-none ${
+              coverageInput
+                ? "font-semibold text-indigo-700 dark:text-indigo-300"
+                : "italic text-slate-400 dark:text-slate-500"
+            }`}>
+              {coverageInput || "¿Quién cubre?"}
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* ── Dropdown — portal so it never overlaps table rows ── */}
       {open && dropPos && typeof document !== "undefined" && createPortal(
         <div
           ref={dropRef}
           role="listbox"
           style={{
             position: "fixed",
-            ...(dropPos.openDown
-              ? { top:    dropPos.top }
-              : { bottom: dropPos.bottom }),
+            ...(dropPos.openDown ? { top: dropPos.top } : { bottom: dropPos.bottom }),
             left:   dropPos.left,
             zIndex: 9999,
           }}
-          className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-2xl w-64 overflow-hidden animate-slide-down"
+          className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-2xl w-64 overflow-hidden"
         >
           {/* Primary shifts */}
           <div className="p-3 space-y-1.5">
@@ -254,23 +305,24 @@ function ShiftCardCell({
             </div>
           </div>
 
+          {/* Note input (shown after picking FERIADO / CUMPLEAÑOS) */}
           {showNote && (
-            <div className="border-t border-slate-100 dark:border-slate-700 p-3 flex gap-2">
+            <div className="border-t border-slate-100 dark:border-slate-700 p-3 space-y-2">
               <input
                 autoFocus
                 type="text"
-                aria-label="Nota"
-                placeholder="Nota opcional..."
+                aria-label="Nombre del feriado o motivo"
+                placeholder="Nombre del feriado / motivo..."
                 value={noteInput}
                 onChange={(e) => setNoteInput(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && saveNote()}
-                className="flex-1 border border-slate-300 dark:border-slate-600 rounded-lg px-2 py-1.5 text-xs bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                className="w-full border border-slate-300 dark:border-slate-600 rounded-lg px-2 py-1.5 text-xs bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-400"
               />
               <button
                 onClick={saveNote}
-                className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg px-3 py-1.5 text-xs font-bold transition-colors"
+                className="w-full bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg px-3 py-1.5 text-xs font-bold transition-colors"
               >
-                OK
+                Guardar
               </button>
             </div>
           )}

@@ -27,7 +27,7 @@ function initials(name: string): string {
 interface ScheduleTableProps {
   schedule:      MonthSchedule;
   employees:     readonly Employee[];
-  onShiftChange: (wi: number, empId: string, date: string, shift: string, note?: string) => void;
+  onShiftChange: (wi: number, empId: string, date: string, shift: string, note?: string, coverage?: string) => void;
   onGuardChange: (wi: number, empId: string | null) => void;
 }
 
@@ -57,7 +57,7 @@ interface WeekBlockProps {
   weekIndex:     number;
   employees:     readonly Employee[];
   month:         number;
-  onShiftChange: (wi: number, empId: string, date: string, shift: string, note?: string) => void;
+  onShiftChange: (wi: number, empId: string, date: string, shift: string, note?: string, coverage?: string) => void;
   onGuardChange: (wi: number, empId: string | null) => void;
 }
 
@@ -160,7 +160,7 @@ function WeekBlock({ week, weekIndex, employees, month, onShiftChange, onGuardCh
                         assignment={assignment}
                         isWeekend={date.getDay() === 0 || date.getDay() === 6}
                         dimmed={isOutside(date)}
-                        onShiftChange={(eId, d, s, n) => onShiftChange(weekIndex, eId, d, s, n)}
+                        onShiftChange={(eId, d, s, n, c) => onShiftChange(weekIndex, eId, d, s, n, c)}
                       />
                     );
                   })}

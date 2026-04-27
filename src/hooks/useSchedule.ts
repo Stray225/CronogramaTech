@@ -1,21 +1,72 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { MonthSchedule } from "@/types/schedule";
-import { Employee } from "@/types/schedule";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { MonthSchedule, Employee, isMonthSchedule } from "@/types/schedule";
 import { AppError, ERROR_LABELS } from "@/lib/errors";
 import { getSchedule, saveSchedule, getRecentHistory } from "@/lib/storage";
 import { suggestMonth, emptyMonth } from "@/lib/suggestions";
+import { parseLocalDate } from "@/lib/dateUtils";
 import { HISTORY_DISPLAY_MONTHS } from "@/constants/app";
+import { monthId } from "@/lib/dateUtils";
+
+// ── Client-side API helpers ──────────────────────────────────────────────────
+
+async function apiFetch(year: number, month: number): Promise<MonthSchedule | null> {
+  try {
+    const res = await fetch(`/api/schedule/${monthId(year, month)}`, { cache: "no-store" });
+    if (!res.ok) return null;
+    const data: unknown = await res.json();
+    return isMonthSchedule(data) ? data : null;
+  } catch {
+    return null;
+  }
+}
+
+async function apiPut(schedule: MonthSchedule): Promise<void> {
+  try {
+    await fetch(`/api/schedule/${schedule.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(schedule),
+    });
+  } catch {
+    // Background sync — swallow error, localStorage is the safety net
+  }
+}
+
+// ── Cross-month sync helper ───────────────────────────────────────────────────
+/** Update a single day in an adjacent month's schedule (for cross-week days). */
+function patchDayInSchedule(
+  schedule: MonthSchedule,
+  employeeId: string,
+  date: string,
+  shift: string,
+  note?: string,
+  coverage?: string,
+): MonthSchedule {
+  let changed = false;
+  const weeks = schedule.weeks.map((week) => {
+    if (!week.rows.some((r) => date in r.days)) return week;
+    changed = true;
+    return {
+      ...week,
+      rows: week.rows.map((row) =>
+        row.employeeId !== employeeId
+          ? row
+          : { ...row, days: { ...row.days, [date]: { shift, note, coverage } } },
+      ),
+    };
+  });
+  if (!changed) return schedule;
+  return { ...schedule, weeks, updatedAt: new Date().toISOString() };
+}
+
+// ── Hook public interface ─────────────────────────────────────────────────────
 
 export interface UseScheduleReturn {
-  /** The current month's schedule, or null while initializing. */
   readonly schedule: MonthSchedule | null;
-  /** Recent prior months, newest first. */
   readonly history: readonly MonthSchedule[];
-  /** Non-null when the last storage operation produced an error. */
   readonly error: AppError | null;
-  /** Human-readable label for the current error, suitable for a toast. */
   readonly errorLabel: string | null;
   clearError: () => void;
   updateShift: (
@@ -24,12 +75,9 @@ export interface UseScheduleReturn {
     date: string,
     shift: string,
     note?: string,
+    coverage?: string,
   ) => void;
-  /** Set the guard for an entire week — all 7 days assigned to the same person. */
-  updateWeekGuard: (
-    weekIndex: number,
-    employeeId: string | null,
-  ) => void;
+  updateWeekGuard: (weekIndex: number, employeeId: string | null) => void;
   applySuggestion: () => void;
   reset: () => void;
 }
@@ -43,34 +91,53 @@ export function useSchedule(
   const [history,  setHistory]  = useState<readonly MonthSchedule[]>([]);
   const [error,    setError]    = useState<AppError | null>(null);
 
-  // ── Load on month/year change ───────────────────────────────────────────────
+  // Avoid writing back data we just loaded from API
+  const skipSaveRef = useRef(false);
+
+  // ── Load on month/year change ─────────────────────────────────────────────
   useEffect(() => {
-    const schedResult = getSchedule(year, month);
-    const histResult  = getRecentHistory(year, month, HISTORY_DISPLAY_MONTHS);
+    // 1. Immediate render: use localStorage (synchronous, zero-flash)
+    const localRes = getSchedule(year, month);
+    const histRes  = getRecentHistory(year, month, HISTORY_DISPLAY_MONTHS);
 
-    if (!schedResult.ok) {
-      setError(schedResult.error);
-      setSchedule(emptyMonth(year, month, employees));
-    } else {
-      setSchedule(schedResult.value ?? emptyMonth(year, month, employees));
-    }
+    const localSched = localRes.ok
+      ? (localRes.value ?? emptyMonth(year, month, employees))
+      : emptyMonth(year, month, employees);
 
-    if (!histResult.ok) {
-      setError(histResult.error);
-      setHistory([]);
-    } else {
-      setHistory(histResult.value);
-    }
+    if (!localRes.ok) setError(localRes.error);
+
+    skipSaveRef.current = true;
+    setSchedule(localSched);
+
+    if (histRes.ok) setHistory(histRes.value);
+    else setError(histRes.error);
+
+    // 2. Background: fetch from DB — use if newer or absent locally
+    apiFetch(year, month).then((apiSched) => {
+      if (!apiSched) return;
+      // Prefer the DB copy if it is newer
+      if (!localRes.ok || !localRes.value || apiSched.updatedAt >= localSched.updatedAt) {
+        skipSaveRef.current = true;
+        setSchedule(apiSched);
+        saveSchedule(apiSched); // keep local cache in sync
+      }
+    });
   }, [year, month]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Persist on every change ─────────────────────────────────────────────────
+  // ── Persist on every change ───────────────────────────────────────────────
   useEffect(() => {
     if (!schedule) return;
+    if (skipSaveRef.current) { skipSaveRef.current = false; return; }
+
     const result = saveSchedule(schedule);
     if (!result.ok) setError(result.error);
+
+    // Background sync to DB
+    apiPut(schedule);
   }, [schedule]);
 
-  // ── Handlers ────────────────────────────────────────────────────────────────
+  // ── Handlers ─────────────────────────────────────────────────────────────
+
   const updateShift = useCallback(
     (
       weekIndex: number,
@@ -78,7 +145,9 @@ export function useSchedule(
       date: string,
       shift: string,
       note?: string,
+      coverage?: string,
     ) => {
+      // Update current month's state
       setSchedule((prev) => {
         if (!prev) return prev;
         return {
@@ -92,20 +161,31 @@ export function useSchedule(
                   rows: week.rows.map((row) =>
                     row.employeeId !== employeeId
                       ? row
-                      : {
-                          ...row,
-                          days: { ...row.days, [date]: { shift, note } },
-                        },
+                      : { ...row, days: { ...row.days, [date]: { shift, note, coverage } } },
                   ),
                 },
           ),
         };
       });
+
+      // Cross-month sync: if date belongs to adjacent month, sync there too
+      const dateObj = parseLocalDate(date);
+      const dateMth = dateObj.getMonth() + 1;
+      const dateYr  = dateObj.getFullYear();
+
+      if (dateMth !== month || dateYr !== year) {
+        const adjRes  = getSchedule(dateYr, dateMth);
+        if (adjRes.ok) {
+          const adjBase = adjRes.value ?? emptyMonth(dateYr, dateMth, employees);
+          const patched = patchDayInSchedule(adjBase, employeeId, date, shift, note, coverage);
+          saveSchedule(patched);
+          apiPut(patched);
+        }
+      }
     },
-    [],
+    [month, year, employees],
   );
 
-  /** Assign one employee to ALL guard days in the week (or null to clear). */
   const updateWeekGuard = useCallback(
     (weekIndex: number, employeeId: string | null) => {
       setSchedule((prev) => {
@@ -116,10 +196,7 @@ export function useSchedule(
           weeks: prev.weeks.map((week, wi) =>
             wi !== weekIndex
               ? week
-              : {
-                  ...week,
-                  guards: week.guards.map((g) => ({ ...g, employeeId })),
-                },
+              : { ...week, guards: week.guards.map((g) => ({ ...g, employeeId })) },
           ),
         };
       });
@@ -128,8 +205,8 @@ export function useSchedule(
   );
 
   const applySuggestion = useCallback(() => {
-    const histResult = getRecentHistory(year, month, HISTORY_DISPLAY_MONTHS);
-    const hist = histResult.ok ? histResult.value : [];
+    const histRes = getRecentHistory(year, month, HISTORY_DISPLAY_MONTHS);
+    const hist    = histRes.ok ? histRes.value : [];
     setSchedule(suggestMonth(year, month, employees, hist));
   }, [year, month, employees]);
 
