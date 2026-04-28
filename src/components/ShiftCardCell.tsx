@@ -46,7 +46,9 @@ const SPECIAL_COLORS: Record<string, { cardBg: string; cardBorder: string; cardT
   GUARDIA:    { cardBg: "bg-purple-100 dark:bg-purple-900/50",cardBorder:"border-l-[3px] border-purple-500",cardText:"text-purple-950 dark:text-purple-100",cardSub:"text-purple-600 dark:text-purple-400"},
 };
 
-// Shifts that can have a coverage note
+// Shifts that show the note input after selection
+const NOTE_SHIFTS     = new Set(["FERIADO", "CUMPLEAÑOS", "VACACIONES"]);
+// Shifts that also show the "¿Quién cubre?" coverage row
 const COVERAGE_SHIFTS = new Set(["FERIADO", "CUMPLEAÑOS"]);
 
 export const PRIMARY_SHIFTS = [
@@ -132,7 +134,7 @@ function ShiftCardCell({
 
   function pick(code: string) {
     onShiftChange(employeeId, date, code, noteInput || undefined, coverageInput || undefined);
-    if (COVERAGE_SHIFTS.has(code)) setShowNote(true);
+    if (NOTE_SHIFTS.has(code)) setShowNote(true);
     else { setOpen(false); setShowNote(false); }
   }
 
@@ -311,8 +313,8 @@ function ShiftCardCell({
               <input
                 autoFocus
                 type="text"
-                aria-label="Nombre del feriado o motivo"
-                placeholder="Nombre del feriado / motivo..."
+                aria-label={assignment.shift === "VACACIONES" ? "Horas o motivo de vacaciones" : "Nombre del feriado o motivo"}
+                placeholder={assignment.shift === "VACACIONES" ? "Horas / motivo de vacaciones..." : "Nombre del feriado / motivo..."}
                 value={noteInput}
                 onChange={(e) => setNoteInput(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && saveNote()}
